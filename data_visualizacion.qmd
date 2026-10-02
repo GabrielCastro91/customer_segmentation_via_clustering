@@ -1,0 +1,386 @@
+---
+theme: cerulean
+title: EDA and Customer Segmentation Via Clustering
+author: Gabriel Castro
+date: 12-27-2025
+format:
+  html:
+    embed-resources: true
+    code-fold: true
+    code-tools: 
+        toggle: false
+        source: true
+    toc: true
+    toc-location: left
+    lof: true
+    number-sections: true
+    smooth-scroll: true 
+---
+
+## Library import and overview of each generated dataframe
+
+Importing libraries, data, and converting to dataframes for interaction in Python:
+
+```{python}
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import datetime as dt
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import silhouette_score
+from sklearn.cluster import KMeans
+```
+
+```{python}
+#| scrolled: true
+data = pd.read_excel(
+    "C:/Users/gicr9/OneDrive/Desktop/UNIR/Visualizacion Avanzada y automatizacion del analisis de datos/Actividad 1/Datos/AdventureWorks.xlsx",
+    sheet_name = [0,1,2,3,4,5,6])
+
+sales_data = data[0]
+customer_data = data[1]
+product_data = data[2]
+reseller_data = data[3]
+sales_order_data = data[4]
+sales_territory_data = data[5]
+date_data = data[6]
+
+pd.set_option('display.max_columns', None)
+```
+
+::: panel-tabset
+### Sales
+
+```{python}
+#| panel-layout: {height: 0, visible: true, width: 100}
+#| scrolled: true
+sales_data.info()
+```
+
+### Customers
+
+```{python}
+#| panel-layout: {height: 0, visible: true, width: 100}
+customer_data.info()
+```
+
+### Products
+
+```{python}
+#| panel-layout: {height: 0, visible: true, width: 100}
+product_data.info()
+```
+
+### Resellers
+
+```{python}
+#| panel-layout: {height: 0, visible: true, width: 100}
+reseller_data.info()
+```
+
+### Orders
+
+```{python}
+#| panel-layout: {height: 0, visible: true, width: 100}
+sales_order_data.info()
+```
+
+### Territories
+
+```{python}
+#| panel-layout: {height: 0, visible: true, width: 100}
+sales_territory_data.info()
+```
+
+### Dates
+
+```{python}
+#| panel-layout: {height: 0, visible: true, width: 100}
+date_data.info()
+```
+:::
+
+```{python}
+#| panel-layout: {height: 169.6527862548828, visible: true, width: 100}
+date_data.rename(columns = {'DateKey':'OrderDateKey'},inplace = True)
+```
+
+## Joining Dataframes and Data Quality Review
+
+Since the sales dataframe has foreign keys to connect to each of the other dataframes, we proceed to combine them into a single one. This way, we can proceed to examine it in more detail, since previously we only obtained an initial view.
+
+```{python}
+#| panel-layout: {height: 0, visible: true, width: 100}
+sales_comb = sales_data.merge(customer_data, how = 'left', on = 'CustomerKey')
+sales_comb = sales_comb.merge(product_data, how = 'left', on = 'ProductKey')
+sales_comb = sales_comb.merge(reseller_data, how = 'left', on = 'ResellerKey')
+sales_comb = sales_comb.merge(sales_order_data, how = 'left', on = 'SalesOrderLineKey')
+sales_comb = sales_comb.merge(sales_territory_data, how = 'left', on = 'SalesTerritoryKey')
+sales_comb = sales_comb.merge(date_data, how = 'left', on = 'OrderDateKey')
+sales_comb.info()
+```
+
+The variable with the highest number of null values ​​compared to the others is "Color". While with "ShipDateKey" we can infer that the orders have not been shipped. In the case of "color", we are interested in examining the related products in more detail.
+
+```{python}
+sales_comb[['Product','Category']][sales_comb['Color'].isnull()].value_counts()
+```
+
+After merging the data using the Left Join method with the `merge()` function, we can make the following observations and inferences regarding data quality:
+
+-   The variables "ShipDateKey" and "Color" have fewer observations than the other variables in the dataset, with 119,140 and 87,109 observations respectively (the remaining variables have 121,253 observations).
+-   For "ShipDateKey," this difference seems to imply that there are orders that have not yet been shipped, while for "Color," the null values ​​appear to correspond to products for which this characteristic is not very relevant.
+-   The other data is complete, especially those relevant to the financial aspect.
+
+Limitations: - Since not all delivery dates are available, we cannot obtain a delivery time calculation that encompasses the entire dataframe. - The dataset only appears to provide product cost, so calculations related to profit margin will be limited in that respect.
+
+Once the dataframes have been unified and their quality and limitations observed, we then proceed to get rid of those variables that we understand are not relevant to our objectives, such as columns with foreign keys that currently occupy space and could slow down the processing of some calculations or visualizations when exporting to our BI tool, and we will complete the null data in the color column based on previous observations.
+
+```{python}
+sales_comb['Color'] = sales_comb['Color'].fillna('N/A')
+```
+
+```{python}
+#sales_comb_final = sales_comb.iloc[:,8:-1]
+sales_comb_customers = sales_comb.drop(columns = sales_comb.iloc[0:1,29:36]).iloc[:,8:-1]
+sales_comb_customers.info()
+```
+
+## Descriptive Statistics
+
+We proceed to take the corresponding descriptive statistics to describe the dataframe to be used, taking into account that to work with the clients we plan to segment using RFM (recency, frequency and monetary value) in which the variables "Sales Order" (to identify unique orders), "Sales Amount" and "Date" take on greater importance.
+
+```{python}
+#| panel-layout: {height: 292.2569580078125, visible: true, width: 100}
+sales_comb_customers.describe()
+```
+
+**Observations:** -
+
+### Box Plot
+
+We visualize the graph with and without outliers to see the actual distribution more clearly.
+
+::: panel-tabset
+### Without Outliers
+
+```{python}
+
+
+plt.figure(figsize = (8,5))
+sns.boxplot(data = sales_comb_customers, x = 'Channel', y = 'Sales Amount', hue = 'Channel', showfliers = False)
+plt.title('Sales Box Plot')
+plt.ylabel('Sales Amount')
+plt.xlabel('Sales Channel')
+plt.show()
+```
+
+### With Outliers
+
+```{python}
+
+plt.figure(figsize = (8,5))
+sns.boxplot(data = sales_comb_customers, x = 'Channel', y = 'Sales Amount', hue = 'Channel' )
+plt.title('Sales Box Plot')
+plt.ylabel('Sales Amount')
+plt.xlabel('Sales Channel')
+plt.show()
+```
+:::
+
+### Histogram
+
+Noticing that the outliers for the sales channels appear to exceed \$5,000 USD, we will proceed to limit the range of our histogram to this value in order to obtain a clearer view.
+
+```{python}
+
+plt.figure(figsize = (8,5))
+plt.hist(data = sales_comb_customers, x = 'Sales Amount', bins = range(0,5000,100), edgecolor = 'black')
+plt.title('Sales Histogram')
+plt.xlabel('Sales')
+plt.xticks(range(0,5000,200),ha = 'right', rotation = 45)
+plt.show()
+```
+
+### Conclusion on the Data Regarding the Graphs
+
+After observing the visualizations above, we can confirm our previous inferences about the data distribution and its dispersion. In addition, the box plot makes it clear that the positive skewness distribution persists even after removing outliers.
+
+## Variable Creation and Modification
+
+Having reviewed the data, we proceed to create a new variable and rename the date column to reflect the purchase order date. We will then immediately view the dataframe information to confirm that the changes have taken effect.
+
+```{python}
+sales_comb_customers.rename(columns = {'Date':'Order Date'}, inplace = True)
+
+sales_comb_customers['Profit'] = sales_comb_customers['Sales Amount'] - sales_comb_customers['Total Product Cost']
+sales_comb_customers['Profit Margin'] = sales_comb_customers['Profit']/sales_comb_customers['Sales Amount']
+sales_comb_customers.info()
+```
+
+```{python}
+sales_comb_customers.head()
+```
+
+## Segmentation
+
+We will create a Dataframe focused on customer segmentation using the RFM (Recency, Frequency, and Monetary Value) framework.
+
+```{python}
+snapshot_date =  sales_comb_customers['Order Date'].max() + dt.timedelta(days = 1)
+
+Customer_mask = sales_comb_customers['Channel'] == 'Internet'
+
+rfm = sales_comb_customers[Customer_mask].groupby(['Customer ID','Customer'], as_index= False).agg({'Order Date': lambda x: (snapshot_date - x.max()).days,
+                                                                   'Sales Order':'nunique', 'Sales Amount':'sum'}).rename(columns = {'Order Date':'Recency',
+                                                                                                                                      'Sales Order': 'Frequency',
+                                                                                                                                      'Sales Amount': 'Monetary Value'
+                                                                                                                                     })
+
+rfm.head()
+```
+
+### Inertia and Silhouette Tests
+
+Using metrics within the `sklearn` library, we proceed to confirm the ideal selection of the number of clusters we will need and whether they align with the RFM framework we have chosen. To do this, we need to standardize the data from the newly created RFM dataframe and define functions. The first metric to calculate will be inertia.
+
+```{python}
+rfm_scaled = StandardScaler().fit_transform(rfm.iloc[:,2:])
+
+num_clusters = [i for i in range(2, 11)]
+
+def kmeans_inertia(num_clusters, x_vals):
+    inertia = []
+    for num in num_clusters:
+        kms = KMeans(n_clusters=num, random_state=42, n_init = 10)
+        kms.fit(x_vals)
+        inertia.append(kms.inertia_)
+
+    return inertia
+```
+
+```{python}
+inertia = kmeans_inertia(num_clusters, rfm_scaled)
+inertia
+```
+
+```{python}
+
+plot = sns.lineplot(x=num_clusters, y=inertia, marker = 'o')
+plt.title('Inertia Graph')
+plt.xlabel('Numbero of Clusters')
+plt.ylabel('Inertia')
+plt.show()
+```
+
+**Interpretation**
+
+Here we can see how the "elbow" in this line graph shows that the slope begins to change from the fourth cluster onward, but this change becomes even more pronounced after the fifth. Based on this, we could say that both options regarding the number of clusters would be acceptable; however, we will perform another test with the silhouette coefficient, defining a different function to confirm.
+
+```{python}
+def kmeans_sil(num_clusters, x_vals):
+    sil_score = []
+    for num in num_clusters:
+        kms = KMeans(n_clusters=num, random_state=42, n_init = 10)
+        kms.fit(x_vals)
+        sil_score.append(silhouette_score(x_vals, kms.labels_))
+
+    return sil_score
+
+
+sil_score = kmeans_sil(num_clusters, rfm_scaled)
+sil_score
+```
+
+```{python}
+
+plot = sns.lineplot(x=num_clusters, y=sil_score, marker = 'o')
+plt.title('Silhouette Score Graph')
+plt.xlabel('Number of Clusters')
+plt.ylabel('Silhouette Score')
+plt.show()
+```
+
+**Interpretation**
+
+The sharp drop from the fourth cluster onward, where it reaches a maximum value of 0.51, indicates that there is indeed a real distinction between clusters, since exceeding 0.5 is an excellent indicator that the segments truly "exist" and are not simply noise.
+
+While it is true that the 4-cluster model fits perfectly with the classic theory of customer segmentation, it is certainly important to also justify the choice through technical criteria.
+
+### Implementing Clustering Model
+
+We applied a K-means model so that, based on the RFM variables we created, each customer is assigned to one of four segments. To avoid errors and prevent the model from assigning weight to variables with a higher scale, we standardized the variables using `StandardScaler()` and `fit_transform()`, while maintaining a replicable result by providing a seed or "random state" of 42.
+
+The cluster assignment result is then added to the "RFM" dataframe, which in turn allows us to append the "Cluster" variable to our previous final dataframe, "sales_comb_customers," using the `merge()` function.
+
+```{python}
+kmeans = KMeans(n_clusters = 4, random_state = 42, n_init = 10)
+rfm['Cluster'] = kmeans.fit_predict(rfm_scaled)
+
+rfm.head()
+```
+
+We grouped the data by cluster using the average of the RFM variables to be able to preliminarily observe them in table format:
+
+```{python}
+summarized_rfm= rfm.groupby('Cluster',as_index = False).agg({'Recency':'mean', 'Frequency':'mean' , 
+                                            'Monetary Value':'mean', 
+                                            'Customer ID':'count'}).rename(columns = {'Recency':'Avg Recency (Days)', 
+                                                                                        'Frequency':'Avg Frequency (Orders)',
+                                                                                        'Monetary Value':'Avg Monetary Value ($)',
+                                                                                         'Customer ID':'Num Customers'}).round()
+summarized_rfm
+```
+
+By observing the results of our clustering, we can define these clusters as follows:
+
+-   0: Lost Customers (841 days since their last order).
+-   1: Standard Customers (our largest cluster with 13,648 customers).
+-   2: Very Active Customers (only 11 days since their last order).
+-   3: High-Value Customers (This cluster represents the highest level of spending/purchase value).
+
+Now we will complete our dataframe with the created clusters and export them for later use. We will export "rfm" and "sales_comb_clustered".
+
+```{python}
+segments = {0:'Clientes perdidos', 1:'Clientes estándar', 2:'Clientes Muy Activos', 3:'Clientes de Alto Valor'}
+
+summarized_rfm['Segments'] =  summarized_rfm['Cluster'].map(segments)
+summarized_rfm
+```
+
+```{python}
+sales_comb_clustered = sales_comb_customers.merge(rfm[['Customer ID', 'Cluster']], how = 'left', on = 'Customer ID')
+sales_comb_clustered.to_csv('C:/Users/gicr9/Downloads/sales_comb_clustered.csv', index = False)
+rfm.to_csv('C:/Users/gicr9/Downloads/rfm.csv', index = False)
+```
+
+### Visualizing Segments
+
+We will now visualize the different segments using a scatter plot.
+
+```{python}
+
+plt.figure(figsize = (8,5))
+
+sns.scatterplot(data = rfm, x = 'Recency', y = 'Monetary Value', hue = 'Cluster')
+plt.xlabel('Days Since Last Order')
+plt.ylabel('Expense/Purchase ($)')
+plt.title('RFM Segmentation ', size = 14, fontweight='bold')
+
+plt.show()
+```
+
+```{python}
+
+plt.figure(figsize = (8,5))
+
+m_bar = sns.barplot(data = summarized_rfm, x = 'Segments', y = 'Avg Monetary Value ($)', hue = 'Cluster')
+plt.xlabel('Segmentos')
+plt.ylabel('Avg Expense ($)')
+plt.title('Avg Expense per Customer Segment', size = 14, fontweight='bold')
+for container in m_bar.containers:
+    m_bar.bar_label(container, fmt='$%.2f')
+
+plt.show()
+```
